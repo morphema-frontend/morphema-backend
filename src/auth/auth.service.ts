@@ -165,6 +165,32 @@ export class AuthService {
     };
   }
 
+  async register(
+    email: string,
+    password: string,
+    role: User['role'],
+    ip?: string,
+    userAgent?: string,
+  ): Promise<AuthResult> {
+    await this.usersService.create({ email, password, role });
+    return this.login(email, password, ip, userAgent);
+  }
+
+  async me(
+    userId: number,
+    sessionId: string | null,
+  ): Promise<AuthResult['user'] & { sessionId: string | null }> {
+    const user = await this.usersService.findOneById(userId);
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('User not found or inactive');
+    }
+
+    return {
+      ...this.sanitizeUser(user),
+      sessionId,
+    };
+  }
+
   async refresh(refreshToken: string): Promise<AuthResult> {
     const { payload, session } = await this.verifyRefreshToken(refreshToken);
 
