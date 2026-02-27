@@ -14,6 +14,7 @@ import { SkillsModule } from './skills/skills.module';
 import { ContractsModule } from './contracts/contracts.module';
 import { AuditModule } from './audit/audit.module';
 import { AdminModule } from './admin/admin.module';
+import { OnboardingController } from './onboarding/onboarding.controller';
 
 import { CreateAuditEventsAndGigPaymentSnapshot1700000000000 } from './migrations/1700000000000-CreateAuditEventsAndGigPaymentSnapshot';
 
@@ -47,7 +48,7 @@ import { CreateAuditEventsAndGigPaymentSnapshot1700000000000 } from './migration
     AuditModule,
     AdminModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, OnboardingController],
   providers: [AppService],
 })
 export class AppModule {}
