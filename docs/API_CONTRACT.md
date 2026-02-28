@@ -39,3 +39,7 @@ All errors are JSON:
 ```json
 { "message": "Error message", "code": "ERROR_CODE" }
 ```
+
+## Audit Notes
+- `audit_events.entityId` is numeric and reserved for numeric entity IDs.
+- Session UUIDs are stored in `payload.sessionId` for session-related actions.

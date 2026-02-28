@@ -226,9 +226,9 @@ export class AuthService {
     await this.audit.log({
       actor: { sub: user.id, role: user.role as any },
       entityType: 'session',
-      entityId: session.id,
+      entityId: null,
       action: 'login',
-      payload: { ip: ip ?? null },
+      payload: { ip: ip ?? null, sessionId: session.id },
       ip: ip ?? null,
       userAgent: userAgent ?? null,
     });
@@ -310,9 +310,9 @@ export class AuthService {
     await this.audit.log({
       actor: { sub: user.id, role: user.role as any },
       entityType: 'session',
-      entityId: newSession.id,
+      entityId: null,
       action: 'refresh',
-      payload: {},
+      payload: { sessionId: newSession.id },
       ip: ip ?? null,
       userAgent: userAgent ?? null,
     });
@@ -344,9 +344,9 @@ export class AuthService {
     await this.audit.log({
       actor: role ? { sub: userId, role: role as any } : undefined,
       entityType: 'session',
-      entityId: sessionId,
+      entityId: null,
       action: 'logout',
-      payload: {},
+      payload: { sessionId },
       ip: ip ?? null,
       userAgent: userAgent ?? null,
     });
