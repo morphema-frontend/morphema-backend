@@ -11,10 +11,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private readonly configService: ConfigService,
     private readonly usersService: UsersService,
   ) {
-    const secret = configService.get<string>('JWT_ACCESS_SECRET');
+    const secret =
+      configService.get<string>('JWT_ACCESS_SECRET') ||
+      configService.get<string>('JWT_SECRET');
     if (!secret) {
       // Fail fast: without this the app would accept "undefined" secret and types rightfully complain.
-      throw new Error('Missing env JWT_ACCESS_SECRET');
+      throw new Error('Missing env JWT_ACCESS_SECRET/JWT_SECRET');
     }
 
     super({

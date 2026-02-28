@@ -12,6 +12,7 @@ if (!email || !password) {
   console.error('Missing SMOKE_EMAIL or SMOKE_PASSWORD env vars');
   process.exit(1);
 }
+const registerEmail = `smoke_${Date.now()}_${Math.random().toString(16).slice(2)}@example.com`;
 
 async function readJsonSafe(res) {
   const text = await res.text();
@@ -34,6 +35,19 @@ async function run() {
   await assertStatus(healthRes, 200, 'GET /api/health');
   const health = await readJsonSafe(healthRes);
   console.log('health', health);
+
+  const registerRes = await fetch(`${baseUrl}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: registerEmail, password, role: 'worker' }),
+  });
+  if (registerRes.status !== 201 && registerRes.status !== 409) {
+    const payload = await readJsonSafe(registerRes);
+    throw new Error(
+      `POST /api/auth/register expected 201/409, got ${registerRes.status}: ${JSON.stringify(payload)}`,
+    );
+  }
+  console.log('register status', registerRes.status);
 
   const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'POST',

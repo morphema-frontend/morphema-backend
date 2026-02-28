@@ -3,6 +3,7 @@ import {
   BadRequestException,
   Injectable,
   Logger,
+  HttpException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -50,9 +51,11 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly audit: AuditService,
   ) {
-    const secret = this.configService.get<string>('JWT_REFRESH_SECRET');
+    const secret =
+      this.configService.get<string>('JWT_REFRESH_SECRET') ||
+      this.configService.get<string>('JWT_SECRET');
     if (!secret) {
-      throw new Error('JWT_REFRESH_SECRET is not set');
+      throw new Error('JWT_REFRESH_SECRET/JWT_SECRET is not set');
     }
     this.refreshSecret = secret;
 
@@ -72,6 +75,7 @@ export class AuthService {
     user: User,
     sessionId: string,
   ): Promise<AuthTokens> {
+    this.logger.log(`issueTokens start userId=${user.id} sessionId=${sessionId}`);
     const jtiAccess = randomUUID();
     const jtiRefresh = randomUUID();
 
@@ -91,11 +95,18 @@ export class AuthService {
       jti: jtiRefresh,
     };
 
-    const accessToken = await this.jwtService.signAsync(accessPayload);
-    const refreshToken = await this.jwtService.signAsync(refreshPayload, {
-      secret: this.refreshSecret,
-      expiresIn: '7d',
-    });
+    let accessToken: string;
+    let refreshToken: string;
+    try {
+      accessToken = await this.jwtService.signAsync(accessPayload);
+      refreshToken = await this.jwtService.signAsync(refreshPayload, {
+        secret: this.refreshSecret,
+        expiresIn: '7d',
+      });
+    } catch (err: any) {
+      this.logger.error('issueTokens failed', err?.stack || err);
+      throw err;
+    }
 
     return { accessToken, refreshToken };
   }
@@ -166,13 +177,19 @@ export class AuthService {
     ip?: string,
     userAgent?: string,
   ): Promise<AuthResult> {
-    const user = await this.usersService.findOneByEmail(email);
     if (!email || !password) {
+      this.logger.log(`login.input invalid hasEmail=${!!email} hasPassword=${!!password}`);
       throw new BadRequestException({
         message: 'Email and password are required',
         code: 'BAD_REQUEST',
       });
     }
+    this.logger.log(`login.input ok hasEmail=${!!email} hasPassword=${!!password}`);
+
+    const user = await this.usersService.findOneByEmail(email);
+    this.logger.log(
+      `login.lookup userFound=${!!user} isActive=${!!user?.isActive} hasPasswordHash=${!!user?.password}`,
+    );
 
     if (!user || !user.isActive) {
       throw new UnauthorizedException({
@@ -198,6 +215,7 @@ export class AuthService {
         code: 'AUTH_INVALID',
       });
     }
+    this.logger.log(`login.passwordCompare matches=${passwordMatches}`);
     if (!passwordMatches) {
       throw new UnauthorizedException({
         message: 'Invalid credentials',
@@ -214,6 +232,7 @@ export class AuthService {
       userAgent: userAgent ?? null,
     });
     const session = await this.sessionsRepo.save(tempSession);
+    this.logger.log(`login.session created sessionId=${session.id}`);
 
     const { accessToken, refreshToken } = await this.issueTokens(
       user,
@@ -222,6 +241,7 @@ export class AuthService {
 
     session.refreshTokenHash = await bcrypt.hash(refreshToken, 10);
     await this.sessionsRepo.save(session);
+    this.logger.log(`login.session updated sessionId=${session.id}`);
 
     await this.audit.log({
       actor: { sub: user.id, role: user.role as any },
@@ -232,6 +252,7 @@ export class AuthService {
       ip: ip ?? null,
       userAgent: userAgent ?? null,
     });
+    this.logger.log(`login.audit logged userId=${user.id} sessionId=${session.id}`);
 
     return {
       accessToken,
@@ -247,7 +268,27 @@ export class AuthService {
     ip?: string,
     userAgent?: string,
   ): Promise<AuthResult> {
-    const created = await this.usersService.create({ email, password, role });
+    if (!email || !password) {
+      this.logger.log(`register.input invalid hasEmail=${!!email} hasPassword=${!!password}`);
+      throw new BadRequestException({
+        message: 'Email and password are required',
+        code: 'BAD_REQUEST',
+      });
+    }
+    this.logger.log(`register.input ok hasEmail=${!!email} hasPassword=${!!password}`);
+
+    let created: User;
+    try {
+      created = await this.usersService.create({ email, password, role });
+    } catch (err: any) {
+      if (err instanceof HttpException && err.getStatus() < 500) {
+        this.logger.warn(`register.create failed status=${err.getStatus()}`);
+      } else {
+        this.logger.error('register.create failed', err?.stack || err);
+      }
+      throw err;
+    }
+    this.logger.log(`register.user created userId=${created.id}`);
     await this.audit.log({
       actor: { sub: created.id, role: created.role as any },
       entityType: 'user',
@@ -257,6 +298,7 @@ export class AuthService {
       ip: ip ?? null,
       userAgent: userAgent ?? null,
     });
+    this.logger.log(`register.audit logged userId=${created.id}`);
     return this.login(email, password, ip, userAgent);
   }
 

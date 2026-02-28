@@ -23,9 +23,11 @@ import { AuditModule } from '../audit/audit.module';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService): JwtModuleOptions => {
-        const secret = config.get<string>('JWT_ACCESS_SECRET');
+        const secret =
+          config.get<string>('JWT_ACCESS_SECRET') ||
+          config.get<string>('JWT_SECRET');
         if (!secret) {
-          throw new Error('JWT_ACCESS_SECRET is not set');
+          throw new Error('JWT_ACCESS_SECRET/JWT_SECRET is not set');
         }
 
         // TTL in secondi, default 900 = 15 minuti

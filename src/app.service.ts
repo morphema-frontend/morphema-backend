@@ -24,8 +24,8 @@ export class AppService {
         process.env.RAILWAY_GIT_COMMIT_SHA ||
         process.env.GIT_COMMIT_SHA ||
         process.env.VERCEL_GIT_COMMIT_SHA ||
-        '',
-      buildTime: process.env.BUILD_TIME || '',
+        'unknown',
+      buildTime: process.env.BUILD_TIME || 'unknown',
     };
   }
 }

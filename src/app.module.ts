@@ -18,17 +18,23 @@ import { OnboardingController } from './onboarding/onboarding.controller';
 
 import { CreateAuditEventsAndGigPaymentSnapshot1700000000000 } from './migrations/1700000000000-CreateAuditEventsAndGigPaymentSnapshot';
 
+const databaseUrl = process.env.DATABASE_URL;
+
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     TypeOrmModule.forRoot({
       type: 'postgres',
-      // Support both legacy DB_* and DATABASE_* envs (no secrets in repo).
-      host: process.env.DATABASE_HOST ?? process.env.DB_HOST ?? 'localhost',
-      port: Number(process.env.DATABASE_PORT ?? process.env.DB_PORT ?? 5432),
-      username: process.env.DATABASE_USER ?? process.env.DB_USER ?? 'postgres',
-      password: process.env.DATABASE_PASSWORD ?? process.env.DB_PASSWORD ?? 'morphemapwd',
-      database: process.env.DATABASE_NAME ?? process.env.DB_NAME ?? 'morphema',
+      ...(databaseUrl
+        ? { url: databaseUrl }
+        : {
+            // Support both legacy DB_* and DATABASE_* envs (no secrets in repo).
+            host: process.env.DATABASE_HOST ?? process.env.DB_HOST ?? 'localhost',
+            port: Number(process.env.DATABASE_PORT ?? process.env.DB_PORT ?? 5432),
+            username: process.env.DATABASE_USER ?? process.env.DB_USER ?? 'postgres',
+            password: process.env.DATABASE_PASSWORD ?? process.env.DB_PASSWORD ?? 'morphemapwd',
+            database: process.env.DATABASE_NAME ?? process.env.DB_NAME ?? 'morphema',
+          }),
       autoLoadEntities: true,
       synchronize: false,
 
