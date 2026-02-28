@@ -1,5 +1,10 @@
 // src/auth/auth.service.ts
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { randomUUID } from 'crypto';
@@ -14,6 +19,7 @@ import { UsersService } from '../users/users.service';
 import { User } from '../users/user.entity';
 import { UserSession } from './user-session.entity';
 import { AccessTokenPayload, RefreshTokenPayload } from './jwt.types';
+import { AuditService } from '../audit/audit.service';
 
 interface AuthTokens {
   accessToken: string;
@@ -32,6 +38,7 @@ export interface AuthResult {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private readonly refreshSecret: string;
   private readonly refreshTtlMs: number;
 
@@ -41,6 +48,7 @@ export class AuthService {
     @InjectRepository(UserSession)
     private readonly sessionsRepo: Repository<UserSession>,
     private readonly configService: ConfigService,
+    private readonly audit: AuditService,
   ) {
     const secret = this.configService.get<string>('JWT_REFRESH_SECRET');
     if (!secret) {
@@ -101,11 +109,17 @@ export class AuthService {
         secret: this.refreshSecret,
       });
     } catch {
-      throw new UnauthorizedException('Invalid refresh token');
+      throw new UnauthorizedException({
+        message: 'Invalid refresh token',
+        code: 'AUTH_INVALID',
+      });
     }
 
     if (payload.tokenType !== 'refresh') {
-      throw new UnauthorizedException('Invalid token type');
+      throw new UnauthorizedException({
+        message: 'Invalid token type',
+        code: 'AUTH_INVALID',
+      });
     }
 
     const session = await this.sessionsRepo.findOne({
@@ -113,12 +127,34 @@ export class AuthService {
     });
 
     if (!session || session.revokedAt || session.expiresAt < new Date()) {
-      throw new UnauthorizedException('Refresh session invalid or expired');
+      throw new UnauthorizedException({
+        message: 'Refresh session invalid or expired',
+        code: 'AUTH_INVALID',
+      });
     }
 
-    const matches = await bcrypt.compare(token, session.refreshTokenHash);
+    if (!session.refreshTokenHash) {
+      throw new UnauthorizedException({
+        message: 'Refresh token mismatch',
+        code: 'AUTH_INVALID',
+      });
+    }
+
+    let matches = false;
+    try {
+      matches = await bcrypt.compare(token, session.refreshTokenHash);
+    } catch (err: any) {
+      this.logger.error('bcrypt.compare failed (refresh)', err?.stack || err);
+      throw new UnauthorizedException({
+        message: 'Refresh token mismatch',
+        code: 'AUTH_INVALID',
+      });
+    }
     if (!matches) {
-      throw new UnauthorizedException('Refresh token mismatch');
+      throw new UnauthorizedException({
+        message: 'Refresh token mismatch',
+        code: 'AUTH_INVALID',
+      });
     }
 
     return { payload, session };
@@ -131,13 +167,42 @@ export class AuthService {
     userAgent?: string,
   ): Promise<AuthResult> {
     const user = await this.usersService.findOneByEmail(email);
-    if (!user || !user.isActive) {
-      throw new UnauthorizedException('Invalid credentials');
+    if (!email || !password) {
+      throw new BadRequestException({
+        message: 'Email and password are required',
+        code: 'BAD_REQUEST',
+      });
     }
 
-    const passwordMatches = await bcrypt.compare(password, user.password);
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException({
+        message: 'Invalid credentials',
+        code: 'AUTH_INVALID',
+      });
+    }
+
+    if (!user.password) {
+      throw new UnauthorizedException({
+        message: 'Invalid credentials',
+        code: 'AUTH_INVALID',
+      });
+    }
+
+    let passwordMatches = false;
+    try {
+      passwordMatches = await bcrypt.compare(password, user.password);
+    } catch (err: any) {
+      this.logger.error('bcrypt.compare failed', err?.stack || err);
+      throw new UnauthorizedException({
+        message: 'Invalid credentials',
+        code: 'AUTH_INVALID',
+      });
+    }
     if (!passwordMatches) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException({
+        message: 'Invalid credentials',
+        code: 'AUTH_INVALID',
+      });
     }
 
     const tempSession = this.sessionsRepo.create({
@@ -158,6 +223,16 @@ export class AuthService {
     session.refreshTokenHash = await bcrypt.hash(refreshToken, 10);
     await this.sessionsRepo.save(session);
 
+    await this.audit.log({
+      actor: { sub: user.id, role: user.role as any },
+      entityType: 'session',
+      entityId: session.id,
+      action: 'login',
+      payload: { ip: ip ?? null },
+      ip: ip ?? null,
+      userAgent: userAgent ?? null,
+    });
+
     return {
       accessToken,
       refreshToken,
@@ -172,7 +247,16 @@ export class AuthService {
     ip?: string,
     userAgent?: string,
   ): Promise<AuthResult> {
-    await this.usersService.create({ email, password, role });
+    const created = await this.usersService.create({ email, password, role });
+    await this.audit.log({
+      actor: { sub: created.id, role: created.role as any },
+      entityType: 'user',
+      entityId: created.id,
+      action: 'register',
+      payload: { email: created.email },
+      ip: ip ?? null,
+      userAgent: userAgent ?? null,
+    });
     return this.login(email, password, ip, userAgent);
   }
 
@@ -182,7 +266,10 @@ export class AuthService {
   ): Promise<AuthResult['user'] & { sessionId: string | null }> {
     const user = await this.usersService.findOneById(userId);
     if (!user || !user.isActive) {
-      throw new UnauthorizedException('User not found or inactive');
+      throw new UnauthorizedException({
+        message: 'User not found or inactive',
+        code: 'AUTH_INVALID',
+      });
     }
 
     return {
@@ -191,12 +278,15 @@ export class AuthService {
     };
   }
 
-  async refresh(refreshToken: string): Promise<AuthResult> {
+  async refresh(refreshToken: string, ip?: string, userAgent?: string): Promise<AuthResult> {
     const { payload, session } = await this.verifyRefreshToken(refreshToken);
 
     const user = await this.usersService.findOneById(payload.sub);
     if (!user || !user.isActive) {
-      throw new UnauthorizedException('User not found or inactive');
+      throw new UnauthorizedException({
+        message: 'User not found or inactive',
+        code: 'AUTH_INVALID',
+      });
     }
 
     session.revokedAt = new Date();
@@ -217,6 +307,16 @@ export class AuthService {
     newSession.refreshTokenHash = await bcrypt.hash(newRefreshToken, 10);
     await this.sessionsRepo.save(newSession);
 
+    await this.audit.log({
+      actor: { sub: user.id, role: user.role as any },
+      entityType: 'session',
+      entityId: newSession.id,
+      action: 'refresh',
+      payload: {},
+      ip: ip ?? null,
+      userAgent: userAgent ?? null,
+    });
+
     return {
       accessToken,
       refreshToken: newRefreshToken,
@@ -224,7 +324,13 @@ export class AuthService {
     };
   }
 
-  async logout(sessionId: string, userId: number): Promise<void> {
+  async logout(
+    sessionId: string,
+    userId: number,
+    role?: User['role'],
+    ip?: string,
+    userAgent?: string,
+  ): Promise<void> {
     const session = await this.sessionsRepo.findOne({
       where: { id: sessionId, userId },
     });
@@ -235,12 +341,28 @@ export class AuthService {
       session.revokedAt = new Date();
       await this.sessionsRepo.save(session);
     }
+    await this.audit.log({
+      actor: role ? { sub: userId, role: role as any } : undefined,
+      entityType: 'session',
+      entityId: sessionId,
+      action: 'logout',
+      payload: {},
+      ip: ip ?? null,
+      userAgent: userAgent ?? null,
+    });
   }
 
-  async logoutAll(userId: number): Promise<void> {
+  async logoutAll(userId: number, role?: User['role']): Promise<void> {
     await this.sessionsRepo.update(
       { userId, revokedAt: IsNull() },
       { revokedAt: new Date() },
     );
+    await this.audit.log({
+      actor: role ? { sub: userId, role: role as any } : undefined,
+      entityType: 'session',
+      entityId: null,
+      action: 'logout_all',
+      payload: {},
+    });
   }
 }

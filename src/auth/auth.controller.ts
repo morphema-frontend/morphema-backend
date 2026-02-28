@@ -43,8 +43,10 @@ export class AuthController {
   }
 
   @Post('refresh')
-  refresh(@Body('refreshToken') refreshToken: string) {
-    return this.authService.refresh(refreshToken);
+  refresh(@Body('refreshToken') refreshToken: string, @Req() req: any) {
+    const ip = req.ip;
+    const userAgent = req.headers['user-agent'] ?? '';
+    return this.authService.refresh(refreshToken, ip, userAgent);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -52,7 +54,10 @@ export class AuthController {
   async logout(@Req() req: any) {
     const userId = req.user.id;
     const sessionId = req.user.sessionId;
-    await this.authService.logout(sessionId, userId);
+    const role = req.user?.role;
+    const ip = req.ip;
+    const userAgent = req.headers['user-agent'] ?? '';
+    await this.authService.logout(sessionId, userId, role, ip, userAgent);
     return { success: true };
   }
 
@@ -60,7 +65,8 @@ export class AuthController {
   @Post('logout-all')
   async logoutAll(@Req() req: any) {
     const userId = req.user.id;
-    await this.authService.logoutAll(userId);
+    const role = req.user?.role;
+    await this.authService.logoutAll(userId, role);
     return { success: true };
   }
 

@@ -10,11 +10,13 @@ import { AuthController } from './auth.controller';
 import { UsersModule } from '../users/users.module';
 import { JwtStrategy } from './jwt.strategy';
 import { UserSession } from './user-session.entity';
+import { AuditModule } from '../audit/audit.module';
 
 @Module({
   imports: [
     ConfigModule,
     UsersModule,
+    AuditModule,
     TypeOrmModule.forFeature([UserSession]),
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({

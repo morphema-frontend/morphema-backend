@@ -23,14 +23,20 @@ export class UsersService {
 
     if (!email || !password) {
       // in teoria già protetto dal DTO, ma non mi fido ciecamente
-      throw new BadRequestException('Email and password are required');
+      throw new BadRequestException({
+        message: 'Email and password are required',
+        code: 'BAD_REQUEST',
+      });
     }
 
     const existing = await this.usersRepository.findOne({
       where: { email },
     });
     if (existing) {
-      throw new ConflictException('Email already in use');
+      throw new ConflictException({
+        message: 'Account already exists',
+        code: 'AUTH_EXISTS',
+      });
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
